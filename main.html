@@ -5,15 +5,32 @@
 <input name="file" type="text" />
 <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
 <script type="text/javascript">
+function datediff(firstDate, secondDate) {
+    // non-inclusive
+    return Math.round((secondDate-firstDate)/(1000*60*60*24));
+}
+
+    function parsePcar(workarea){
+
+    }
+
   function standardizePcarsDate(data) {
     // Parses the PCAR date line, returns object indicating what to document
     let active_services = [1, 2, 3, 4, 5]
     let service_type = 1
-    let date = "18 Oct 29"
+    //let data1 = "24           OCT        2000       23           OCT        2001       0064       0026       0000       0000       015         00105    00105    010000  FV                4"
+    let data1 = "24           OCT        2018       31           OCT        2018       008         2"
+    let spl = data1.split(" ").filter(function(item) {return item != ""})
+    let st_d = `${spl[0]} ${spl[1]} ${spl[2]}`
+    let sp_d = `${spl[3]} ${spl[4]} ${spl[5]}`
+    let start_date = new Date(st_d)
+    let stop_date = new Date(sp_d)
     return {
-      date: "18 Oct 29",
-      service_type: 2,
-      active_service: service_type in active_services
+      start_date: start_date,
+      stop_date: stop_date,
+      days: datediff(start_date, stop_date) + 1,
+      service_type: spl[spl.length - 1],  // last in listj
+      active_service: active_services.includes(parseInt(spl[spl.length-1])),
     }
   }
 
@@ -68,7 +85,7 @@
   }
 
   function log_console(log_input) {
-    // not really the best thing here, but provides a bit more clarity for environments 
+    // not really the best thing here, but provides a bit more clarity for environments
     // dev console is disabled
     if (log_input == "") {
       log_input = " ";
@@ -95,10 +112,11 @@
   }
 
   function setupWorkArea(runFileData, inputFiles) {
-        
+
     // "will,montgomery,apr,18,2018,aug,20,00,11,31,02,10,17,03,06,04,2019,apr,18,2018,aug,20"
     $.each(runFileData.split('\n'), function(index, memberList) {
-      //log_console(memberList);      
+      //log_console(memberList);
+
       let dataMap = data_to_index_map(memberList);
       let nameBase = `${dataMap['first_name']}_${dataMap['last_name']}`
       console.log(nameBase);
@@ -109,6 +127,10 @@
       var mpcarsResult = findByMatchingProperties([...inputFiles], {
         name: nameBase + ".mpcars"
       });
+      let workarea = {dataMap: dataMap,
+                      pcarsFile: pcarsResulot[0],
+                       mpcarsFile: mpcarsResult[0],
+      }
       if (!Array.isArray(pcarsResult) || pcarsResult.length != 1 ||
         !Array.isArray(mpcarsResult) || mpcarsResult.length != 1) {
         log_console(
@@ -120,10 +142,13 @@
         throw new Error();
       } else {
         log_console(`All files found for member: ${nameBase}`)
+        parsePcar(workarea);
       }
     })
   }
   $(document).ready(function() {
+
+  console.log(standardizePcarsDate(""));
     $("input[name=file1]").change(function() {
       let main_file = 'run.all';
       let all_files = $(this).get(0).files;
