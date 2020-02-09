@@ -5,45 +5,230 @@
 <input name="file" type="text" />
 <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
 <script type="text/javascript">
-function datediff(firstDate, secondDate) {
-    // non-inclusive
-    return Math.round((secondDate-firstDate)/(1000*60*60*24));
+    function datediff(firstDate, secondDate) {
+        // non-inclusive
+        return Math.round((secondDate-firstDate)/(1000*60*60*24));
+    }
+    function isPositiveInteger(value){
+        return Number.isInteger(value) && value >= 0;
+    }
+    function calculateDays(years, months, days, throwOnBad){
+        if (!isPositiveInteger(years) ||
+            !isPositiveInteger(months) ||
+            !isPositiveInteger(days)){
+            if (throwOnBad === true){
+                throw new Error();
+            }
+            return 0;
+        }
+        return years*365 + months*30 + days;
+    }
+    function parseHeaderdata(workarea){
+        //console.log('parseHeaderData')
+        dmap = workarea['dataMap']
+
+        net_active_prev_214 = calculateDays(parseInt(dmap['net_active_year']), parseInt(dmap['net_active_month']), parseInt(dmap['net_active_day']), true);
+
+        prior_active_prev_214 = calculateDays(parseInt(dmap['prior_active_year']), parseInt(dmap['prior_active_month']), parseInt(dmap['prior_active_day']), true);
+
+        prior_inactive_prev_214 =  calculateDays(parseInt(dmap['prior_inactive_year']), parseInt(dmap['prior_inactive_month']), parseInt(dmap['prior_inactive_day']), true);
+        workarea['prior_214'] = {'net_active': net_active_prev_214,
+                                 'prior_active': prior_active_prev_214,
+                                 'prior_inactive': prior_inactive_prev_214,
+        }
+        // dummy values until the delta has been calculated
+        workarea['new_214'] = {'net_active': net_active_prev_214,
+                                 'prior_active': prior_active_prev_214,
+                                 'prior_inactive': prior_inactive_prev_214,
+        }
+        //console.log(workarea)
+    }
+    function parsePcar(workarea){
+      /*{dataMap: dataMap,
+                      pcarsFile: pcarsResult[0],
+                      */
+        let data = readFileAsText(workarea['pcarsFile'])
+
+        data.then(function(value) {
+            let current = 0
+            let combined = value.split('\n').reduce(function(obj, line) {
+                if (!isBlank(line)){
+                    if (line.toLowerCase().indexOf('**service history**') !== -1 ) {
+                       //console.log('service history')
+                       current = 1;
+                    }
+                    if (line.toLowerCase().indexOf('**current r/r year points**') !== -1 ) {
+                        //console.log('r/r year points')
+                       current = 2;
+                    }
+                    if (line.toLowerCase().indexOf('**current r/r year eci points**') !== -1 ) {
+                        //console.log('r/r year eci points')
+                       current = 3;
+                    }
+                    lineData = splitRemoveSpaces(line);
+                    if (current == 1 &&
+                        line.toLowerCase().indexOf('pts acrd') !== -1) {
+                    // "AD          IDT         IDS         ECI          MBR      TOTAL   RETIRE SATSVC HIST QUAL PTS ACRD TO 23 OCT 2018       5571 0081 0000 0051 241   05944    05717    180000 STAT CNTL"
+                        let serviceHeader = lineData;
+                        adDate = new Date(`${serviceHeader[13]} ${serviceHeader[14]} ${serviceHeader[15]}`);
+                        obj['adDate'] = adDate;
+                        obj['adDays'] = parseInt(serviceHeader[16]);
+                        obj['satSvcYYMMDD'] = serviceHeader[23];
+                    }
+                    else if (current == 2){
+                        // "24           OCT        2018       31           OCT        2018       008         2"
+                        // can also be some junk
+                        // TODO check if both start and stop are not in the obj
+                        newObj = standardizePcarsDate(lineData);
+                        if (!isEmpty(newObj)){
+                            obj['pcarDates'] = obj['pcarDates'] || [];
+                            obj['pcarDates'].push(newObj);
+
+                        }
+                    }
+                }
+                return obj;
+            }, {});
+            // parsed pcars....
+            //
+            workarea['pcarData'] = combined
+            console.log(combined)
+
+            combinePcarHeaderData(workarea)
+        })
+    }
+
+function isEmpty(obj) {
+    for(var key in obj) {
+        if(obj.hasOwnProperty(key))
+            return false;
+    }
+    return true;
 }
 
-    function parsePcar(workarea){
+function isBlank(str) {
+    return (!str || /^\s*$/.test(str));
+}
 
+function splitRemoveSpaces(str) {
+    return str.split(" ").filter(function(item) {return item != ""})
+}
+function isValidDate(inputDate){
+    if (Object.prototype.toString.call(inputDate) === "[object Date]") {
+      // it is a date
+      if (isNaN(inputDate.getTime())) {  // d.valueOf() could also work
+        return false
+      } else {
+        return true
+      }
+    } else {
+        return false
+      // not a date
     }
-
-  function standardizePcarsDate(data) {
+}
+  function standardizePcarsDate(lineData) {
     // Parses the PCAR date line, returns object indicating what to document
-    let active_services = [1, 2, 3, 4, 5]
-    let service_type = 1
+    let activeServices = [1, 2, 3, 4, 5];
+    let activeServicesIndex = 7;
     //let data1 = "24           OCT        2000       23           OCT        2001       0064       0026       0000       0000       015         00105    00105    010000  FV                4"
-    let data1 = "24           OCT        2018       31           OCT        2018       008         2"
-    let spl = data1.split(" ").filter(function(item) {return item != ""})
-    let st_d = `${spl[0]} ${spl[1]} ${spl[2]}`
-    let sp_d = `${spl[3]} ${spl[4]} ${spl[5]}`
-    let start_date = new Date(st_d)
-    let stop_date = new Date(sp_d)
-    return {
-      start_date: start_date,
-      stop_date: stop_date,
-      days: datediff(start_date, stop_date) + 1,
-      service_type: spl[spl.length - 1],  // last in listj
-      active_service: active_services.includes(parseInt(spl[spl.length-1])),
+    let spl = lineData
+    if (!Array.isArray(spl)){
+        return {}
     }
+    else if(spl.length < activeServicesIndex){
+        return {}
+    }
+    let st_d = `${spl[0]} ${spl[1]} ${spl[2]}`;
+    let sp_d = `${spl[3]} ${spl[4]} ${spl[5]}`;
+    let startDate= new Date(st_d);
+    let stopDate = new Date(sp_d);
+    if (!isValidDate(startDate) || !isValidDate(stopDate)) {
+        return {}
+    }
+    newObj = {
+      startDate: startDate,
+      stopDate: stopDate,
+      days: datediff(startDate, stopDate) + 1,
+      serviceType: spl[activeServicesIndex],  // last in listj
+      isActiveService: activeServices.includes(parseInt(spl[activeServicesIndex])),
+      initialText: lineData,
+    }
+    return newObj
   }
+    function findNewDayCount(pcarDataArray, startDate, stopDate, checkStr){
+        // 1. amount of total innactive 'active_noninclusive'
+        // 2. amount of active between startDate and StopDate inclusive 'active_inclusive'
+        // 3. amount of active not between startDate and stopDate 'innactive'
+        function activeInclusiveCheck(date, isActive, startDate, stopDate) {
+            return (date <= stopDate && date >= startDate && isActive === true)
+        }
+        function activeNonInclusiveCheck(date, isActive, startDate, stopDate) {
+            return ((date > stopDate || date < startDate) && isActive === true)
+        }
+        function innactiveCheck(date, isActive, startDate, stopDate) {
+            return isActive === false;
+        }
+        let checkType = {'active_noninclusive' : activeNonInclusiveCheck,
+                         'innactive': innactiveCheck,
+                         'active_inclusive': activeInclusiveCheck,
+        }
+        let checkfn = checkType[checkStr];
+        return pcarDataArray.reduce(function(acc, newDate) {
+            let newDayAddition = 0;
+            if (checkfn(newDate['startDate'], newDate['isActiveService'], startDate, stopDate)){
+                newDayAddition = newDate['days'];
+            }
 
-  function standardizeMpcarsDate(data) {
-    // Parses the MPCAR date line, returns object indicating what to document
-    let active_services = [1, 2, 3, 4, 5]
-    let service_type = 1
-    let date = "18-Oct-29"
-    return {
-      date: "18-Oct-29",
-      service_type: 2,
-      active_service: service_type in active_services
+            return acc = acc + newDayAddition;
+            }, 0);
     }
+    function combinePcarHeaderData(workarea){
+        pcarAdDays = workarea['pcarData']['adDays']
+        prior214AdDays = workarea['prior_214']['prior_active']
+        if(pcarAdDays != prior214AdDays){
+            log_console(`pcar AD days: ${pcarAdDays}; prior 214 AD Days: ${prior214AdDays}`)
+        }
+        let allSum =  workarea['pcarData']['pcarDates'].reduce(function(acc, newDate){return acc = acc + newDate['days'];}, 0);
+
+        let inDates = workarea['dataMap']
+        period_start_year: "2019"
+        period_start_month: "apr"
+        period_start_day: "18"
+        period_stop_year: "2019"
+        period_stop_month: "aug"
+        period_stop_day: "29"
+        let start_d = `${inDates['period_start_year']} ${inDates['period_start_month']} ${inDates['period_start_month']}`;
+        let stop_d = `${inDates['period_stop_year']} ${inDates['period_stop_month']} ${inDates['period_stop_month']}`;
+        let startDate= new Date(start_d);
+        let stopDate = new Date(stop_d);
+        if (!isValidDate(startDate) || !isValidDate(stopDate)) {
+            exit
+        }
+
+
+
+        let newADSum = findNewDayCount(workarea['pcarData']['pcarDates'], startDate, stopDate, 'active_noninclusive')
+        let newPriorADSum = findNewDayCount(workarea['pcarData']['pcarDates'], startDate, stopDate, 'active_inclusive')
+        let newInnactiveSum = findNewDayCount(workarea['pcarData']['pcarDates'], startDate, stopDate, 'innactive')
+        log_console(`new ad sum: ${newADSum}; new prior ad sum: ${newPriorADSum}; new innactive sum: ${newInnactiveSum}`)
+
+        //workarea['new_214']['net_active'] += newADSum
+        //workarea['new_214']['prior_active'] += newPriorADSum
+        //kworkarea['new_214']['prior_inactive'] += newInnactiveSum
+        log_console(`member: "${workarea['dataMap']['first_name']}  ${workarea['dataMap']['last_name']}" new ad sum: ${workarea['new_214']['net_active'] + newADSum}; new prior ad sum: ${workarea['new_214']['prior_active'] + newPriorADSum}; new innactive sum: ${workarea['new_214']['prior_inactive'] + newInnactiveSum}`)
+        console.log(workarea)
+    }
+    function standardizeMpcarsDate(data) {
+        // TODO: not implemented
+        // Parses the MPCAR date line, returns object indicating what to document
+        let active_services = [1, 2, 3, 4, 5]
+        let service_type = 1
+        let date = "18-Oct-29"
+        return {
+            date: "18-Oct-29",
+            service_type: 2,
+            active_service: service_type in active_services
+        }
   }
 
   function determineADTime(data) {
@@ -73,7 +258,7 @@ function datediff(firstDate, secondDate) {
       prior_active_year: 11,
       prior_active_month: 12,
       prior_active_day: 13,
-      prior_inactive_active_year: 14,
+      prior_inactive_year: 14,
       prior_inactive_month: 15,
       prior_inactive_day: 16,
     };
@@ -116,39 +301,43 @@ function datediff(firstDate, secondDate) {
     // "will,montgomery,apr,18,2018,aug,20,00,11,31,02,10,17,03,06,04,2019,apr,18,2018,aug,20"
     $.each(runFileData.split('\n'), function(index, memberList) {
       //log_console(memberList);
-
-      let dataMap = data_to_index_map(memberList);
-      let nameBase = `${dataMap['first_name']}_${dataMap['last_name']}`
-      console.log(nameBase);
-      console.log(inputFiles);
-      var pcarsResult = findByMatchingProperties([...inputFiles], {
-        name: nameBase + ".pcars"
-      });
-      var mpcarsResult = findByMatchingProperties([...inputFiles], {
-        name: nameBase + ".mpcars"
-      });
-      let workarea = {dataMap: dataMap,
-                      pcarsFile: pcarsResulot[0],
-                       mpcarsFile: mpcarsResult[0],
-      }
-      if (!Array.isArray(pcarsResult) || pcarsResult.length != 1 ||
-        !Array.isArray(mpcarsResult) || mpcarsResult.length != 1) {
-        log_console(
-          `Missing files for member: ${nameBase} expected files: "${nameBase + ".pcars"}", "${nameBase + ".mpcars"}"`
-        )
-        log_console(
-          "Please correct and resubmit, optionally remove from the run.all file until that member is corrected")
-        // We are done until this is corrected.
-        throw new Error();
-      } else {
-        log_console(`All files found for member: ${nameBase}`)
-        parsePcar(workarea);
-      }
+        // skip blank lines
+        if (!isBlank(memberList)){
+            let dataMap = data_to_index_map(memberList);
+            let nameBase = `${dataMap['first_name']}_${dataMap['last_name']}`
+            console.log(nameBase);
+            console.log(inputFiles);
+            var pcarsResult = findByMatchingProperties([...inputFiles], {
+              name: nameBase + ".pcars"
+            });
+            var mpcarsResult = findByMatchingProperties([...inputFiles], {
+              name: nameBase + ".mpcars"
+            });
+            let workarea = {dataMap: dataMap,
+                            pcarsFile: pcarsResult[0],
+                             mpcarsFile: mpcarsResult[0],
+            }
+            if (!Array.isArray(pcarsResult) || pcarsResult.length != 1 ||
+                !Array.isArray(mpcarsResult) || mpcarsResult.length != 1) {
+                log_console(
+                  `Missing files for member: ${nameBase} expected files: "${nameBase + ".pcars"}", "${nameBase + ".mpcars"}"`
+                )
+                log_console(
+                  "Please correct and resubmit, optionally remove from the run.all file until that member is corrected");
+                log_console("exiting parsing, please try again");
+                // We are done until this is corrected.
+                //throw new Error();
+                return
+            } else {
+                log_console(`All files found for member: ${nameBase}`)
+                parseHeaderdata(workarea);
+                parsePcar(workarea);
+            }
+        }
     })
   }
   $(document).ready(function() {
 
-  console.log(standardizePcarsDate(""));
     $("input[name=file1]").change(function() {
       let main_file = 'run.all';
       let all_files = $(this).get(0).files;
