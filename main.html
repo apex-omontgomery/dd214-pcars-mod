@@ -95,8 +95,7 @@
   }
 
   function setupWorkArea(runFileData, inputFiles) {
-    let workarea = {};
-    log_console(inputFiles)
+        
     // "will,montgomery,apr,18,2018,aug,20,00,11,31,02,10,17,03,06,04,2019,apr,18,2018,aug,20"
     $.each(runFileData.split('\n'), function(index, memberList) {
       //log_console(memberList);      
@@ -128,8 +127,9 @@
     $("input[name=file1]").change(function() {
       let main_file = 'run.all';
       let all_files = $(this).get(0).files;
-      $.each($(this).get(0).files, function(index, item) {
-        log_console(item.name);
+	  log_console("selected files:")
+      $.each(all_files, function(index, item) {
+        log_console(`-- ${item.name}`);
       });
       $.each($(this).get(0).files, function(index, file) {
         if (file.name == main_file) {
