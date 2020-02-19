@@ -1,9 +1,8 @@
 <!DOCTYPE html>
 <html lang="en">
 
-<input type="file" id="foo" name="file1" multiple="multiple" />
+<input type="file" id="file_loader" name="file1" multiple="multiple" onchange="startRun(this.files)" />
 <input name="file" type="text" />
-<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
 <script type="text/javascript">
     function datediff(firstDate, secondDate) {
         // non-inclusive
@@ -275,8 +274,10 @@ function isValidDate(inputDate){
     if (log_input == "") {
       log_input = " ";
     }
-    $("#log_content").append('<div> > ' + log_input + '</div>');
+    let elem = document.getElementById("log_content")
+    elem.innerHTML = elem.innerHTML + '<div>' + log_input + '</div>';
   }
+
   async function readFileAsText(file) {
     let reader = new FileReader();
     reader.readAsText(file);
@@ -299,12 +300,13 @@ function isValidDate(inputDate){
   function setupWorkArea(runFileData, inputFiles) {
 
     // "will,montgomery,apr,18,2018,aug,20,00,11,31,02,10,17,03,06,04,2019,apr,18,2018,aug,20"
-    $.each(runFileData.split('\n'), function(index, memberList) {
+    runFileData.split('\n').forEach(function(memberList, index) {
       //log_console(memberList);
         // skip blank lines
         if (!isBlank(memberList)){
             let dataMap = data_to_index_map(memberList);
             let nameBase = `${dataMap['first_name']}_${dataMap['last_name']}`
+            log_console(nameBase)
             console.log(nameBase);
             console.log(inputFiles);
             var pcarsResult = findByMatchingProperties([...inputFiles], {
@@ -336,25 +338,23 @@ function isValidDate(inputDate){
         }
     })
   }
-  $(document).ready(function() {
-
-    $("input[name=file1]").change(function() {
+  function startRun(all_files) {
       let main_file = 'run.all';
-      let all_files = $(this).get(0).files;
-	  log_console("selected files:")
-      $.each(all_files, function(index, item) {
-        log_console(`-- ${item.name}`);
+      console.log(all_files)
+      const fileArray = [...all_files];
+      fileArray.forEach(function(item, index) {
+          let dataS = "-- " + String(item.name)
+          log_console(dataS);
       });
-      $.each($(this).get(0).files, function(index, file) {
-        if (file.name == main_file) {
+      fileArray.forEach(function(item, index) {
+        if (item.name == main_file) {
           log_console('FOUND IT')
-          let data = readFileAsText(file)
+          let data = readFileAsText(item)
           data.then((value) => setupWorkArea(value, all_files));
           return;
         }
       })
-    });
-  });
+    }
 </script>
 
 <div id="log_container" style="background-color: #000000;
