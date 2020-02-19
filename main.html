@@ -47,7 +47,6 @@
                       pcarsFile: pcarsResult[0],
                       */
         let data = readFileAsText(workarea['pcarsFile'])
-
         data.then(function(value) {
             let current = 0
             let combined = value.split('\n').reduce(function(obj, line) {
@@ -91,8 +90,6 @@
             // parsed pcars....
             //
             workarea['pcarData'] = combined
-            console.log(combined)
-
             combinePcarHeaderData(workarea)
         })
     }
@@ -182,10 +179,12 @@ function isValidDate(inputDate){
             }, 0);
     }
     function combinePcarHeaderData(workarea){
+
+        log_console(`Finished parsing for member: ${workarea['user']}`)
         pcarAdDays = workarea['pcarData']['adDays']
         prior214AdDays = workarea['prior_214']['prior_active']
         if(pcarAdDays != prior214AdDays){
-            log_console(`pcar AD days: ${pcarAdDays}; prior 214 AD Days: ${prior214AdDays}`)
+            log_console(` -- pcar AD days: ${pcarAdDays}; prior 214 AD Days: ${prior214AdDays}`)
         }
         let allSum =  workarea['pcarData']['pcarDates'].reduce(function(acc, newDate){return acc = acc + newDate['days'];}, 0);
 
@@ -209,12 +208,14 @@ function isValidDate(inputDate){
         let newADSum = findNewDayCount(workarea['pcarData']['pcarDates'], startDate, stopDate, 'active_noninclusive')
         let newPriorADSum = findNewDayCount(workarea['pcarData']['pcarDates'], startDate, stopDate, 'active_inclusive')
         let newInnactiveSum = findNewDayCount(workarea['pcarData']['pcarDates'], startDate, stopDate, 'innactive')
-        log_console(`new ad sum: ${newADSum}; new prior ad sum: ${newPriorADSum}; new innactive sum: ${newInnactiveSum}`)
+
+
+        log_console(` -- new ad sum: ${newADSum}; new prior ad sum: ${newPriorADSum}; new innactive sum: ${newInnactiveSum}`)
 
         //workarea['new_214']['net_active'] += newADSum
         //workarea['new_214']['prior_active'] += newPriorADSum
         //kworkarea['new_214']['prior_inactive'] += newInnactiveSum
-        log_console(`member: "${workarea['dataMap']['first_name']}  ${workarea['dataMap']['last_name']}" new ad sum: ${workarea['new_214']['net_active'] + newADSum}; new prior ad sum: ${workarea['new_214']['prior_active'] + newPriorADSum}; new innactive sum: ${workarea['new_214']['prior_inactive'] + newInnactiveSum}`)
+        log_console(`  -- member: "${workarea['dataMap']['first_name']}  ${workarea['dataMap']['last_name']}" new ad sum: ${workarea['new_214']['net_active'] + newADSum}; new prior ad sum: ${workarea['new_214']['prior_active'] + newPriorADSum}; new innactive sum: ${workarea['new_214']['prior_inactive'] + newInnactiveSum}`)
         console.log(workarea)
     }
     function standardizeMpcarsDate(data) {
@@ -306,8 +307,6 @@ function isValidDate(inputDate){
         if (!isBlank(memberList)){
             let dataMap = data_to_index_map(memberList);
             let nameBase = `${dataMap['first_name']}_${dataMap['last_name']}`
-            log_console(nameBase)
-            console.log(nameBase);
             console.log(inputFiles);
             var pcarsResult = findByMatchingProperties([...inputFiles], {
               name: nameBase + ".pcars"
@@ -317,7 +316,8 @@ function isValidDate(inputDate){
             });
             let workarea = {dataMap: dataMap,
                             pcarsFile: pcarsResult[0],
-                             mpcarsFile: mpcarsResult[0],
+                            mpcarsFile: mpcarsResult[0],
+                            user: nameBase
             }
             if (!Array.isArray(pcarsResult) || pcarsResult.length != 1 ||
                 !Array.isArray(mpcarsResult) || mpcarsResult.length != 1) {
