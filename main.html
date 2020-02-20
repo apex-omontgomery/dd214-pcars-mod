@@ -1,98 +1,156 @@
 <!DOCTYPE html>
 <html lang="en">
 
-<input type="file" id="file_loader" name="file1" multiple="multiple" onchange="startRun(this.files)" />
-<input name="file" type="text" />
-<script type="text/javascript">
-    function datediff(firstDate, secondDate) {
-        // non-inclusive
-        return Math.round((secondDate-firstDate)/(1000*60*60*24));
+    <input type="file" id="file_loader" name="file1" multiple="multiple" onchange="startRun(this.files)" />
+    <input name="file" type="text" />
+    <script type="text/javascript">
+        function datediff(firstDate, secondDate) {
+            // non-inclusive
+            return Math.round((secondDate-firstDate)/(1000*60*60*24));
+        }
+function isPositiveInteger(value){
+    return Number.isInteger(value) && value >= 0;
+}
+function calculateDays(years, months, days, throwOnBad){
+    if (!isPositiveInteger(years) ||
+        !isPositiveInteger(months) ||
+        !isPositiveInteger(days)){
+        if (throwOnBad === true){
+            throw new Error();
+        }
+        return 0;
     }
-    function isPositiveInteger(value){
-        return Number.isInteger(value) && value >= 0;
+    return years*365 + months*30 + days;
+}
+function combineSingleUserResult(workarea, pcarData, mpcarData) {
+
+    console.log(workarea)
+    log_console(`Finished parsing for member: ${workarea['user']}`)
+    let ordersStart = workarea['ordersStartDate']
+    let ordersStop = workarea['ordersStopDate']
+    let prevStopDate = pcarData['prevPcar214Dates']['stopDate']
+
+    if(ordersStart <= prevStopDate)
+    {
+        console.log('bad range')
+        log_console('-- dates provided overlap or are improperly ordered and should be reviewed')
+        log_console(`-- prev214 stop ${pcarData['prevPcar214Dates']['stopDate']}`)
+        log_console(`-- orders start ${workarea['ordersStartDate']}`)
+        return;
     }
-    function calculateDays(years, months, days, throwOnBad){
-        if (!isPositiveInteger(years) ||
-            !isPositiveInteger(months) ||
-            !isPositiveInteger(days)){
-            if (throwOnBad === true){
-                throw new Error();
+    console.log('here')
+    let mpcarDates = mpcarData['mpcarData']['mpcarDates']
+    let newADSum = findNewDayCount(mpcarDates, ordersStart, ordersStop, prevStopDate, 'activeNew')
+    let newPriorADSum = findNewDayCount(mpcarDates, ordersStart, ordersStop, prevStopDate, 'activePrev')
+    let newInnactiveSum = findNewDayCount(mpcarDates, ordersStart, ordersStop, prevStopDate, 'innactive')
+
+    return `${workarea['dataMap']['initialText']},${convertDaysToCSVDate(newPriorADSum)},${convertDaysToCSVDate(newADSum)},${convertDaysToCSVDate(newInnactiveSum)},${newPriorADSum},${newADSum},${newInnactiveSum}`
+}
+function convertDaysToCSVDate(inputDays) {
+    let years = Math.floor(inputDays / 365)
+    let excessYearDays = inputDays - (years*365)
+    let months = Math.floor(excessYearDays / 30)
+    let days = inputDays - (years*365) - (months*30)
+    return `${years},${months},${days}`
+
+}
+function parseMPcar(workarea){
+    let data = readFileAsText(workarea['mpcarsFile'])
+    let outData = data.then(function(value) {
+        let lines = value.split('\n');
+        // skip first line
+        let combined = lines.slice(1).reduce(function(obj, line) {
+            // ",01-JAN-2020.31-JAN-2020.31.2...,"
+            let dateData = line.split(',')[1]
+            if (!isBlank(dateData)){
+                // "01-JAN-2020.31-JAN-2020.31.2..."
+                let dates = splitRemoveSpaces(dateData, '.');
+                // ["01-JAN-2020", "31-JAN-2020", "31", "2"]
+                // start, stop, points, point_type
+                newObj = standardizeMPcarsDate(dates)
+                if (!isEmpty(newObj)){
+                    obj['mpcarDates'] = obj['mpcarDates'] || [];
+                    obj['mpcarDates'].push(newObj);
+                }
             }
-            return 0;
-        }
-        return years*365 + months*30 + days;
-    }
-    function parseHeaderdata(workarea){
-        //console.log('parseHeaderData')
-        dmap = workarea['dataMap']
+            return obj;
+        }, {});
+        // parsed pcars....
+        //
+        console.log('mp combined')
+        console.log(combined)
+        return { mpcarData: combined};
+    })
+    return outData
+}
 
-        net_active_prev_214 = calculateDays(parseInt(dmap['net_active_year']), parseInt(dmap['net_active_month']), parseInt(dmap['net_active_day']), true);
-
-        prior_active_prev_214 = calculateDays(parseInt(dmap['prior_active_year']), parseInt(dmap['prior_active_month']), parseInt(dmap['prior_active_day']), true);
-
-        prior_inactive_prev_214 =  calculateDays(parseInt(dmap['prior_inactive_year']), parseInt(dmap['prior_inactive_month']), parseInt(dmap['prior_inactive_day']), true);
-        workarea['prior_214'] = {'net_active': net_active_prev_214,
-                                 'prior_active': prior_active_prev_214,
-                                 'prior_inactive': prior_inactive_prev_214,
-        }
-        // dummy values until the delta has been calculated
-        workarea['new_214'] = {'net_active': net_active_prev_214,
-                                 'prior_active': prior_active_prev_214,
-                                 'prior_inactive': prior_inactive_prev_214,
-        }
-        //console.log(workarea)
-    }
-    function parsePcar(workarea){
-      /*{dataMap: dataMap,
+function parsePcar(workarea){
+    /*{dataMap: dataMap,
                       pcarsFile: pcarsResult[0],
-                      */
-        let data = readFileAsText(workarea['pcarsFile'])
-        data.then(function(value) {
-            let current = 0
-            let combined = value.split('\n').reduce(function(obj, line) {
-                if (!isBlank(line)){
-                    if (line.toLowerCase().indexOf('**service history**') !== -1 ) {
-                       //console.log('service history')
-                       current = 1;
-                    }
-                    if (line.toLowerCase().indexOf('**current r/r year points**') !== -1 ) {
-                        //console.log('r/r year points')
-                       current = 2;
-                    }
-                    if (line.toLowerCase().indexOf('**current r/r year eci points**') !== -1 ) {
-                        //console.log('r/r year eci points')
-                       current = 3;
-                    }
-                    lineData = splitRemoveSpaces(line);
-                    if (current == 1 &&
-                        line.toLowerCase().indexOf('pts acrd') !== -1) {
+     */
+    let data = readFileAsText(workarea['pcarsFile'])
+    let outData = data.then(function(value) {
+        let current = 0
+        let combined = value.split('\n').reduce(function(obj, line) {
+            if (!isBlank(line)){
+                if (line.toLowerCase().indexOf('**service history**') !== -1 ) {
+                    //console.log('service history')
+                    current = 1;
+                }
+                if (line.toLowerCase().indexOf('**current r/r year points**') !== -1 ) {
+                    //console.log('r/r year points')
+                    current = 2;
+                }
+                if (line.toLowerCase().indexOf('**current r/r year eci points**') !== -1 ) {
+                    //console.log('r/r year eci points')
+                    current = 3;
+                }
+                lineData = splitRemoveSpaces(line, " ");
+                if (current == 1) {
                     // "AD          IDT         IDS         ECI          MBR      TOTAL   RETIRE SATSVC HIST QUAL PTS ACRD TO 23 OCT 2018       5571 0081 0000 0051 241   05944    05717    180000 STAT CNTL"
+                    if(line.toLowerCase().indexOf('pts acrd') !== -1) {
                         let serviceHeader = lineData;
                         adDate = new Date(`${serviceHeader[13]} ${serviceHeader[14]} ${serviceHeader[15]}`);
+
                         obj['adDate'] = adDate;
                         obj['adDays'] = parseInt(serviceHeader[16]);
                         obj['satSvcYYMMDD'] = serviceHeader[23];
                     }
-                    else if (current == 2){
-                        // "24           OCT        2018       31           OCT        2018       008         2"
-                        // can also be some junk
-                        // TODO check if both start and stop are not in the obj
-                        newObj = standardizePcarsDate(lineData);
-                        if (!isEmpty(newObj)){
-                            obj['pcarDates'] = obj['pcarDates'] || [];
-                            obj['pcarDates'].push(newObj);
-
-                        }
+                    obj['tempPrevPcarDates'] = obj['tempPrevPcarDates'] || [];
+                    obj['tempPrevPcarDates'].push(line);
+                }
+                else if (current == 2){
+                    // "24           OCT        2018       31           OCT        2018       008         2"
+                    // can also be some junk
+                    // TODO check if both start and stop are not in the obj
+                    newObj = standardizePcarsDate(lineData);
+                    if (!isEmpty(newObj)){
+                        obj['pcarDates'] = obj['pcarDates'] || [];
+                        obj['pcarDates'].push(newObj);
                     }
                 }
-                return obj;
-            }, {});
-            // parsed pcars....
-            //
-            workarea['pcarData'] = combined
-            combinePcarHeaderData(workarea)
+            }
+            return obj;
+        }, {});
+        // parsed pcars....
+        //
+        combined['prevPcarDates'] = []
+        combined['tempPrevPcarDates'].forEach(function(singleLine, index) {
+
+            newObj = standardizePcarsDate(splitRemoveSpaces(singleLine, " "));
+            if (!isEmpty(newObj)){
+                combined['prevPcarDates'].push(newObj);
+            }
         })
-    }
+        console.log(combined)
+        console.log("largest")
+        console.log(combined['prevPcarDates'][combined['prevPcarDates'].length-1])
+        combined['prevPcar214Dates'] = combined['prevPcarDates'][combined['prevPcarDates'].length-1]
+        console.log(combined)
+        return combined;
+    })
+    return outData;
+}
 
 function isEmpty(obj) {
     for(var key in obj) {
@@ -106,23 +164,23 @@ function isBlank(str) {
     return (!str || /^\s*$/.test(str));
 }
 
-function splitRemoveSpaces(str) {
-    return str.split(" ").filter(function(item) {return item != ""})
+function splitRemoveSpaces(str, split_thing) {
+    return str.split(split_thing).filter(function(item) {return item != ""})
 }
 function isValidDate(inputDate){
     if (Object.prototype.toString.call(inputDate) === "[object Date]") {
-      // it is a date
-      if (isNaN(inputDate.getTime())) {  // d.valueOf() could also work
-        return false
-      } else {
-        return true
-      }
+        // it is a date
+        if (isNaN(inputDate.getTime())) {  // d.valueOf() could also work
+            return false
+        } else {
+            return true
+        }
     } else {
         return false
-      // not a date
+        // not a date
     }
 }
-  function standardizePcarsDate(lineData) {
+function standardizePcarsDate(lineData) {
     // Parses the PCAR date line, returns object indicating what to document
     let activeServices = [1, 2, 3, 4, 5];
     let activeServicesIndex = 7;
@@ -142,229 +200,266 @@ function isValidDate(inputDate){
         return {}
     }
     newObj = {
-      startDate: startDate,
-      stopDate: stopDate,
-      days: datediff(startDate, stopDate) + 1,
-      serviceType: spl[activeServicesIndex],  // last in listj
-      isActiveService: activeServices.includes(parseInt(spl[activeServicesIndex])),
-      initialText: lineData,
+        startDate: startDate,
+        stopDate: stopDate,
+        days: datediff(startDate, stopDate) + 1,
+        serviceType: spl[activeServicesIndex],  // last in listj
+        isActiveService: activeServices.includes(parseInt(spl[activeServicesIndex])),
+        initialText: lineData,
     }
     return newObj
-  }
-    function findNewDayCount(pcarDataArray, startDate, stopDate, checkStr){
-        // 1. amount of total innactive 'active_noninclusive'
-        // 2. amount of active between startDate and StopDate inclusive 'active_inclusive'
-        // 3. amount of active not between startDate and stopDate 'innactive'
-        function activeInclusiveCheck(date, isActive, startDate, stopDate) {
-            return (date <= stopDate && date >= startDate && isActive === true)
-        }
-        function activeNonInclusiveCheck(date, isActive, startDate, stopDate) {
-            return ((date > stopDate || date < startDate) && isActive === true)
-        }
-        function innactiveCheck(date, isActive, startDate, stopDate) {
-            return isActive === false;
-        }
-        let checkType = {'active_noninclusive' : activeNonInclusiveCheck,
-                         'innactive': innactiveCheck,
-                         'active_inclusive': activeInclusiveCheck,
-        }
-        let checkfn = checkType[checkStr];
-        return pcarDataArray.reduce(function(acc, newDate) {
-            let newDayAddition = 0;
-            if (checkfn(newDate['startDate'], newDate['isActiveService'], startDate, stopDate)){
+}
+function findNewDayCount(pcarDataArray, ordersStart, ordersStop, prevStop, checkStr){
+    // 1. amount of total innactive 'active_noninclusive'
+    // 2. amount of active between startDate and StopDate inclusive 'active_inclusive'
+    // 3. amount of active not between startDate and stopDate 'innactive'
+    console.log(pcarDataArray)
+    function activePrior(dateStart, dateStop, isActive, orderStart, orderStop, pStop) {
+        return (isActive === true && (dateStart < orderStart && dateStart > pStop && dateStop < orderStop && dateStop > prevStop))
+    }
+    function activeCurrent(dateStart, dateStop, isActive, orderStart, orderStop, pStop) {
+        return (isActive === true && (dateStart >= orderStart && dateStart < orderStop && dateStop <= orderStop && dateStop > prevStop))
+    }
+    function innactiveCheck(dateStart, dateStop, isActive, orderStart, orderStop, pStop) {
+        return (isActive === false && (dateStart >= orderStart && dateStart < orderStop && dateStop <= orderStop && dateStop > prevStop))
+        return isActive === false;
+    }
+    function outsideRange(dateStart, dateStop, isActive, orderStart, orderStop, pStop) {
+        return ((dateStart <= pStop && dateStop <= pStop) || (dateStart > orderStop && dateStop > orderStop))
+    }
+    let checkType = {'activeNew' : activeCurrent,
+        'activePrev': activePrior,
+        'innactive': innactiveCheck,
+    }
+    let checkfn = checkType[checkStr];
+    return pcarDataArray.reduce(function(acc, newDate) {
+        let newDayAddition = 0;
+        if (!outsideRange(newDate['startDate'], newDate['stopDate'], newDate['isActiveService'], ordersStart, ordersStop, prevStop)){
+            if (checkfn(newDate['startDate'], newDate['stopDate'], newDate['isActiveService'], ordersStart, ordersStop, prevStop)){
                 newDayAddition = newDate['days'];
             }
+            // inside the date range somehow  but crossing boundary
+            else if (newDayAddition == 0 &&
+                !activeCurrent(newDate['startDate'], newDate['stopDate'], newDate['isActiveService'], ordersStart, ordersStop, prevStop) &&
+                !activePrior(newDate['startDate'], newDate['stopDate'], newDate['isActiveService'], ordersStart, ordersStop, prevStop) &&
+                !innactiveCheck(newDate['startDate'], newDate['stopDate'], newDate['isActiveService'], ordersStart, ordersStop, prevStop))
+            {
+                log_console(`-- while attempting to calculate points found book-ended mpcars data that crosses a date boundary for type ${checkStr}`)
+                log_console(`-- mpcars startDate for error: ${newDate['startDate']}`)
+                log_console(`-- mpcars stopDate for error: ${newDate['stopDate']}`)
+            }
+        }
 
-            return acc = acc + newDayAddition;
-            }, 0);
+        return acc = acc + newDayAddition;
+    }, 0);
+}
+function standardizeMPcarsDate(lineData) {
+    // ["01-JAN-2020", "31-JAN-2020", "31", "2"]
+    let activeServices = [1, 2, 3, 4, 5];
+    let allowed_indexes = 3;
+    let spl = lineData;
+    if (!Array.isArray(spl)){
+        return {}
     }
-    function combinePcarHeaderData(workarea){
-
-        log_console(`Finished parsing for member: ${workarea['user']}`)
-        pcarAdDays = workarea['pcarData']['adDays']
-        prior214AdDays = workarea['prior_214']['prior_active']
-        if(pcarAdDays != prior214AdDays){
-            log_console(` -- pcar AD days: ${pcarAdDays}; prior 214 AD Days: ${prior214AdDays}`)
-        }
-        let allSum =  workarea['pcarData']['pcarDates'].reduce(function(acc, newDate){return acc = acc + newDate['days'];}, 0);
-
-        let inDates = workarea['dataMap']
-        period_start_year: "2019"
-        period_start_month: "apr"
-        period_start_day: "18"
-        period_stop_year: "2019"
-        period_stop_month: "aug"
-        period_stop_day: "29"
-        let start_d = `${inDates['period_start_year']} ${inDates['period_start_month']} ${inDates['period_start_month']}`;
-        let stop_d = `${inDates['period_stop_year']} ${inDates['period_stop_month']} ${inDates['period_stop_month']}`;
-        let startDate= new Date(start_d);
-        let stopDate = new Date(stop_d);
-        if (!isValidDate(startDate) || !isValidDate(stopDate)) {
-            exit
-        }
-
-
-
-        let newADSum = findNewDayCount(workarea['pcarData']['pcarDates'], startDate, stopDate, 'active_noninclusive')
-        let newPriorADSum = findNewDayCount(workarea['pcarData']['pcarDates'], startDate, stopDate, 'active_inclusive')
-        let newInnactiveSum = findNewDayCount(workarea['pcarData']['pcarDates'], startDate, stopDate, 'innactive')
-
-
-        log_console(` -- new ad sum: ${newADSum}; new prior ad sum: ${newPriorADSum}; new innactive sum: ${newInnactiveSum}`)
-
-        //workarea['new_214']['net_active'] += newADSum
-        //workarea['new_214']['prior_active'] += newPriorADSum
-        //kworkarea['new_214']['prior_inactive'] += newInnactiveSum
-        log_console(`  -- member: "${workarea['dataMap']['first_name']}  ${workarea['dataMap']['last_name']}" new ad sum: ${workarea['new_214']['net_active'] + newADSum}; new prior ad sum: ${workarea['new_214']['prior_active'] + newPriorADSum}; new innactive sum: ${workarea['new_214']['prior_inactive'] + newInnactiveSum}`)
-        console.log(workarea)
+    else if(spl.length < allowed_indexes){
+        return {}
     }
-    function standardizeMpcarsDate(data) {
-        // TODO: not implemented
-        // Parses the MPCAR date line, returns object indicating what to document
-        let active_services = [1, 2, 3, 4, 5]
-        let service_type = 1
-        let date = "18-Oct-29"
-        return {
-            date: "18-Oct-29",
-            service_type: 2,
-            active_service: service_type in active_services
-        }
-  }
-
-  function determineADTime(data) {
+    let startDate= new Date(spl[0]);
+    let stopDate = new Date(spl[1]);
+    if (!isValidDate(startDate) || !isValidDate(stopDate)) {
+        return {}
+    }
+    newObj = {
+        startDate: startDate,
+        stopDate: stopDate,
+        days: datediff(startDate, stopDate) + 1,
+        points: parseInt(spl[2]),
+        serviceType: parseInt(spl[allowed_indexes]),  // last in list
+        isActiveService: activeServices.includes(parseInt(spl[allowed_indexes])),
+    }
+    return newObj
+}
+function determineADTime(data) {
     // PTS ACRD TO DD MMM YYYY XXXX ---- ---- ---- --- -----   ZZZZZ
     // EX:
     // ' PTS ACRD TO 23 OCT 2018 5571 0081 0000 0051 241 05944   05717
     // Finds the XXXX value which is Prior Active time
     // Finds the YYYY value whish is total satsvc
-  }
+}
 
-  function data_to_index_map(data) {
+function data_to_index_map(data) {
     // example of "data"
     // 'will,montgomery,2018,apr,18,2018,aug,20,00,11,31,02,10,17,03,06,04,2019,apr,18,2018,aug,20'
     let split_members = data.split(',');
     let index_map = {
-      first_name: 0,
-      last_name: 1,
-      period_start_year: 2,
-      period_start_month: 3,
-      period_start_day: 4,
-      period_stop_year: 5,
-      period_stop_month: 6,
-      period_stop_day: 7,
-      net_active_year: 8,
-      net_active_month: 9,
-      net_active_day: 10,
-      prior_active_year: 11,
-      prior_active_month: 12,
-      prior_active_day: 13,
-      prior_inactive_year: 14,
-      prior_inactive_month: 15,
-      prior_inactive_day: 16,
+        first_name: 0,
+        last_name: 1,
+        period_start_year: 2,
+        period_start_month: 3,
+        period_start_day: 4,
+        period_stop_year: 5,
+        period_stop_month: 6,
+        period_stop_day: 7,
     };
     var mapped_data = Object.keys(index_map).reduce(function(obj, key) {
-      obj[key] = split_members[index_map[key]];
-      return obj;
+        obj[key] = split_members[index_map[key]];
+        return obj;
     }, {});
+    mapped_data['initialText'] = data
     return mapped_data;
-  }
+}
 
-  function log_console(log_input) {
+function log_console(log_input) {
     // not really the best thing here, but provides a bit more clarity for environments
     // dev console is disabled
     if (log_input == "") {
-      log_input = " ";
+        log_input = " ";
     }
     let elem = document.getElementById("log_content")
     elem.innerHTML = elem.innerHTML + '<div>' + log_input + '</div>';
-  }
+}
 
-  async function readFileAsText(file) {
+async function readFileAsText(file) {
     let reader = new FileReader();
     reader.readAsText(file);
     let result_base64 = new Promise((resolve) => {
-      let fileReader = new FileReader();
-      fileReader.onload = (e) => resolve(fileReader.result);
-      fileReader.readAsText(file);
+        let fileReader = new FileReader();
+        fileReader.onload = (e) => resolve(fileReader.result);
+        fileReader.readAsText(file);
     });
     return await result_base64;
-  }
+}
 
-  function findByMatchingProperties(set, properties) {
+function findByMatchingProperties(set, properties) {
     return set.filter(function(entry) {
-      return Object.keys(properties).every(function(key) {
-        return entry[key] === properties[key];
-      });
+        return Object.keys(properties).every(function(key) {
+            return entry[key] === properties[key];
+        });
     });
-  }
+}
 
-  function setupWorkArea(runFileData, inputFiles) {
+function setupWorkArea(runFileData, inputFiles) {
 
     // "will,montgomery,apr,18,2018,aug,20,00,11,31,02,10,17,03,06,04,2019,apr,18,2018,aug,20"
-    runFileData.split('\n').forEach(function(memberList, index) {
-      //log_console(memberList);
+    //let allResults = runFileData.split('\n').forEach(function(memberList, index) {
+    let allResults = runFileData.split('\n').reduce(function(obj, memberList) {
+
+        //log_console(memberList);
         // skip blank lines
+        let results = ""
         if (!isBlank(memberList)){
             let dataMap = data_to_index_map(memberList);
             let nameBase = `${dataMap['first_name']}_${dataMap['last_name']}`
             console.log(inputFiles);
             var pcarsResult = findByMatchingProperties([...inputFiles], {
-              name: nameBase + ".pcars"
+                name: nameBase + ".pcars"
             });
             var mpcarsResult = findByMatchingProperties([...inputFiles], {
-              name: nameBase + ".mpcars"
+                name: nameBase + ".mpcars"
             });
+
+            let inDates = dataMap
+            let start_d = `${inDates['period_start_year']} ${inDates['period_start_month']} ${inDates['period_start_day']}`;
+            let stop_d = `${inDates['period_stop_year']} ${inDates['period_stop_month']} ${inDates['period_stop_day']}`;
+            let startDate= new Date(start_d);
+            let stopDate = new Date(stop_d);
+            if (!isValidDate(startDate) || !isValidDate(stopDate)) {
+                exit
+            }
+
+
             let workarea = {dataMap: dataMap,
-                            pcarsFile: pcarsResult[0],
-                            mpcarsFile: mpcarsResult[0],
-                            user: nameBase
+                ordersStartDate: startDate,
+                ordersStopDate: stopDate,
+                pcarsFile: pcarsResult[0],
+                mpcarsFile: mpcarsResult[0],
+                user: nameBase
             }
             if (!Array.isArray(pcarsResult) || pcarsResult.length != 1 ||
                 !Array.isArray(mpcarsResult) || mpcarsResult.length != 1) {
                 log_console(
-                  `Missing files for member: ${nameBase} expected files: "${nameBase + ".pcars"}", "${nameBase + ".mpcars"}"`
+                    `Missing files for member: ${nameBase} expected files: "${nameBase + ".pcars"}", "${nameBase + ".mpcars"}"`
                 )
                 log_console(
-                  "Please correct and resubmit, optionally remove from the run.all file until that member is corrected");
+                    "Please correct and resubmit, optionally remove from the run.all file until that member is corrected");
                 log_console("exiting parsing, please try again");
                 // We are done until this is corrected.
                 //throw new Error();
-                return
+                results = `${workarea['dataMap']['initialText']},ERROR WHEN PARSING USER`
             } else {
                 log_console(`All files found for member: ${nameBase}`)
-                parseHeaderdata(workarea);
-                parsePcar(workarea);
+                let pcarDataPromise = parsePcar(workarea);
+                let mpcarDataPromise = parseMPcar(workarea);
+                results = Promise.all([pcarDataPromise, mpcarDataPromise]).then(function(values) {
+                    console.log("all promises")
+                    let goodResults = combineSingleUserResult(workarea, ...values);
+                    console.log(goodResults)
+                    log_console(goodResults)
+                    return goodResults;
+                });
+
+            }
+            if (!isBlank(results)){
+                obj.push(results)
             }
         }
-    })
-  }
-  function startRun(all_files) {
-      let main_file = 'run.all';
-      console.log(all_files)
-      const fileArray = [...all_files];
-      fileArray.forEach(function(item, index) {
-          let dataS = "-- " + String(item.name)
-          log_console(dataS);
-      });
-      fileArray.forEach(function(item, index) {
-        if (item.name == main_file) {
-          log_console('FOUND IT')
-          let data = readFileAsText(item)
-          data.then((value) => setupWorkArea(value, all_files));
-          return;
-        }
-      })
-    }
-</script>
+        return obj
+    }, [])
 
-<div id="log_container" style="background-color: #000000;
-  width: 100%;
-  height: 100%;
-  max-width: 400px
-  max-height: 400px">
-  <div id="log_content" style="color: #ffffffff; font-size: 12px; font-family: monospace;">
-    <p>************</p>
-  </div>
-</div>
+    Promise.all(allResults).then(function(values) {
+        console.log('new')
+        console.log(values)
+        outData = []
+        log_console('~~~~~~~~~~~ output data ~~~~~~~')
+        let header = 'first_name,last_name,period_start_year,period_start_month,period_start_day,period_stop_year,period_stop_month,period_stop_day,priorAdYear,priorADMonth,priorADDay,currADYear,currADMonth,currADDay,innactiveYear,innactiveMonth,innactiveDay,totalPriorADDay,totalCurrAdDay,totalInnactiveDay'
+        log_console(header)
+        outData.push(header)
+        values.forEach(function(line, index) {
+            outData.push(line)
+            log_console(line)
+        })
+        let csvContent = "data:text/csv;charset=utf-8,";
+
+        outData.forEach(function(row) {
+            //let row = rowArray.join(",");
+            csvContent += row + "\r\n";
+        });
+        var encodedUri = encodeURI(csvContent);
+        var link = document.createElement("a");
+        link.setAttribute("href", encodedUri);
+        link.setAttribute("download", "my_data.csv");
+        document.body.appendChild(link); // Required for FF
+
+        link.click(); // This will download the data file named "my_data.csv".
+    })
+}
+function startRun(all_files) {
+    let main_file = 'run.all';
+    console.log(all_files)
+    const fileArray = [...all_files];
+    fileArray.forEach(function(item, index) {
+        let dataS = "-- " + String(item.name)
+        log_console(dataS);
+    });
+    fileArray.forEach(function(item, index) {
+        if (item.name == main_file) {
+            log_console('FOUND IT')
+            let data = readFileAsText(item)
+            data.then((value) => setupWorkArea(value, all_files));
+            return;
+        }
+    })
+}
+    </script>
+
+    <div id="log_container" style="background-color: #000000;
+             width: 100%;
+             height: 100%;
+             max-width: 400px
+             max-height: 400px">
+        <div id="log_content" style="color: #ffffffff; font-size: 12px; font-family: monospace;">
+            <p>************</p>
+        </div>
+    </div>
 
 </html>
